@@ -1,0 +1,98 @@
+         .386
+         .387
+   .MODEL FLAT
+
+TEXT32   SEGMENT USE32 PUBLIC DWORD 'CODE'
+TEXT32   ENDS
+
+DATA32   SEGMENT USE32 PUBLIC DWORD 'DATA'
+         ORG 0
+flatPtr  LABEL NEAR
+DATA32   ENDS
+
+DGROUP   GROUP DATA32
+
+DATA16   SEGMENT USE16 PUBLIC DWORD 'DATA16'
+         PUBLIC _16_FlatDS
+_16_FlatDS  dd 0
+DATA16   ENDS
+
+
+
+TEXT32   SEGMENT
+         ASSUME CS:FLAT,DS:NOTHING,ES:NOTHING
+         PUBLIC _Call32
+_Call32  PROC NEAR
+   ; Stack ist 16-Bit beim Aufruf
+   ; EAX FlatDS
+   ; EBX Grî·e der Parameter in Bytes
+   ; EDX Addresse der aufzurufenden Funktion
+   ; Stack:
+   ;        Parameter
+   ;        Sel         --> RetAddr
+   ;        Off         --> RetAddr
+   ; 1. 32-Bit Stack bauen
+   mov ecx,ss
+   and ecx,0FFFFH
+   shl ecx,16-3   ; Selector-Bits ausblenden und gleich verschieben
+   mov cx,sp      ; ECX = Flat --> SS:SP
+   ; ASSUME CS:NOTHING
+   ; mov eax,0
+   lea eax,FLAT:DATA32
+   ; ASSUME CS:FLAT
+   mov ss,eax
+   mov esp,ecx
+   ; Jetzt ist Stack 32-Bit
+   test esp,3
+   jz stDWORD
+   and esp, 0FFFFFFFCH ; Stack auf 4 Byte ausrichten
+stDWORD:
+   push ds
+   push es
+   mov ds,eax     ; FLAT-Sel in ds laden
+   mov es,eax     ; FLAT-Sel in es laden
+   push ecx       ; alten Stackpointer sichern
+
+   push ebp
+   mov ebp,esp
+
+   add ecx,4      ; Pointer auf Parameter erzeugen
+   push ecx
+   call edx    ; eax=(edx)((void*)args);
+
+   mov esp,ebp
+   pop ebp
+
+   pop ecx        ; alten Stackpointer zurÅckholen
+   mov edx,[ecx]  ; in EDX RÅckkehraddresse
+   mov [ecx+ebx],edx ; RÅckkehraddresse and die Richtige Stelle schreiben
+
+   pop es         ; es wiederherstellen
+   pop ds         ; ds wiederherstellen
+
+   mov esp,ecx    ; ESP wieder mit OriginalWert laden
+   add esp,ebx    ; Stack:       SEL:OFF RetAddr d.h. Parameter entfernen
+   mov edx,esp
+   shr edx,16-3
+   or edx, 7      ; TILED Selector erzeugen
+   ; Stack 16-Bit
+   mov ss,edx    ;
+   and esp,0FFFFH ;   High Bits ausblenden
+   shld edx,eax,16 ; Ergebnis erzeugen
+   db 66H        ;
+   retf
+_Call32  ENDP
+
+TEXT32   ENDS
+
+TEXT16 SEGMENT USE16 PARA PUBLIC 'CODE'
+       ASSUME CS:TEXT16
+       PUBLIC CALL32
+CALL32 PROC FAR
+       jmp far ptr FLAT:_Call32
+CALL32 ENDP
+
+TEXT16 ENDS
+
+END
+
